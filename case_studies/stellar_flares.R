@@ -8,6 +8,8 @@ library(RTMBdist)   # for ExGaussian distribution
 library(fmesher)    # for mesh and FEM matrices
 library(Matrix)     # for sparse matrices
 
+source("utils.R")
+
 ### colors for plotting
 color = c("#00000070", "red", "orange")
 
@@ -255,32 +257,15 @@ dev.off()
 
 
 
-# plot for paper
-# Decoded time series
-pdf("./figs/decoded_ts.pdf", width = 6, height = 2.7)
-par(mfrow = c(1,1), mar = c(4,4,0.2,2)+0.1)
-plot(data$time[idx], data$y[idx], col = color[states[idx]], pch = 16,
-     xlab = "Time", ylab = "Flux", bty = "n")
-# lines(data$time[idx], mod_simple$f[idx], lwd = 2, lty = 3, col = "blue")
-lines(data$time[idx], mod$f[idx], lwd = 3, col = "plum")
-legend("topright",
-       legend = c("Quiet", "Firing", "Decaying", "Trend"),
-       pch = c(rep(16, 3), NA),
-       lwd = c(rep(NA, 3), 3),
-       col = c(color, "plum"), bty = "n")
-dev.off()
-
-
-
 # simulate from fitted model to check acf
 set.seed(123)
 Gamma <- mod$Gamma
-delta <- stationary(Gamma)
+delta <- mod$delta[1,]
 sigma <- mod$sigma
 r <- mod$r
 lambda <- mod$lambda
 
-nObs <- 1e5
+nObs <- 1e6
 s <- z <- rep(NA, nObs)
 
 s[1] <- sample(1:3, 1, prob = delta)
@@ -298,10 +283,13 @@ for(t in 2:nObs) {
   }
 }
 
-acf(z)
+# Look at PACF: empirical measure for conditional dependence
+pacf(z)
+# significant lags up to 5 -> bw = 15 seems enough
 
 # simulate from fitted GP
-sim <- rgmrf(10, mod$mu, mod$Q)
+Q <- mod$tau^2 * (mod$kappa^4 * spde1$c0 + 2 * cos(pi * mod$omega) * mod$kappa^2 * spde1$g1 + spde1$g2)
+sim <- rgmrf(10, mod$mu, Q)
 
 par(mfrow = c(1,1))
 plot(sim[1,], type = "l", col = "#00000050", ylim = c(-15,15))
