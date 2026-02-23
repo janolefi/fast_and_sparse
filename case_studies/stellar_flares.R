@@ -9,7 +9,7 @@ library(fmesher)    # for mesh and FEM matrices
 library(Matrix)     # for sparse matrices
 
 ### colors for plotting
-color = c("#00000050", "red", "orange")
+color = c("#00000070", "red", "orange")
 
 
 ### loading data
@@ -40,59 +40,64 @@ spde1 <- fm_fem(mesh1)
 mesh2 <- fm_mesh_1d(data$time[data$trackID == 2])
 spde2 <- fm_fem(mesh2)
 
+### Simple analysis without state switching
+nll0 <- function(par) {
+  getAll(par, dat)
 
-# ### Simple analysis without HMM
-# nll <- function(par) {
-#   getAll(par, dat)
-#
-#   ## observation model
-#   # parameter transformations
-#   sigma = exp(log_sigma); REPORT(sigma)
-#   f <- f0 + mu; REPORT(f0); REPORT(f) # f is the smooth function
-#   nll <- -sum(dnorm(y, f, sigma, log = TRUE)) # observation liklihood
-#
-#   ## GP model
-#   # parameter transformations
-#   tau <- exp(log_tau); REPORT(tau)
-#   kappa <- exp(log_kappa); REPORT(kappa)
-#   rho <- sqrt(8) / kappa; REPORT(rho) # distance where corr has dropped to 0.1
-#   omega <- plogis(logit_omega); REPORT(omega)
-#   Q <- tau^2 * (kappa^4 * c0 + 2 * cos(pi*omega) * kappa^2 * g1 + g2); REPORT(Q)
-#   nll <- nll - dgmrf(f - mu, 0, Q, log = TRUE) # GP likelihood
-#
-#   nll
-# }
-#
-# # initial parameter list
-# par <- list(
-#   log_sigma = log(7),
-#   log_tau = log(0.005),
-#   log_kappa = log(30),
-#   f0 = numeric(nrow(spde$c0)),
-#   logit_omega = qlogis(0.9),
-#   mu = -0.5
-# )
-#
-# # data list
-# dat <- list(
-#   y = data$y,
-#   c0 = spde$c0, g1 = spde$g1, g2 = spde$g2
-# )
-#
-# obj_simple <- MakeADFun(nll, par, random = "f0")
-# opt_simple <- nlminb(obj_simple$par, obj_simple$fn, obj_simple$gr)
-# mod_simple <- obj_simple$report()
-# mod_simple$tau
-# mod_simple$kappa
-# mod_simple$omega
-#
-# ### visualising results
-# idx = 1:nrow(data)
-# plot(data$time[idx], data$y[idx], pch = 16,
-#      xlab = "Time (sec)", ylab = "Flux", bty = "n", main = "Stellar flare detection")
-# lines(data$time[idx], mod_simple$f[idx], lwd = 2, col = "plum")
-# # smooth is not very periodic
-# # erratic behaviour whenever there is a flare
+  sigma <- exp(log_sigma); REPORT(sigma)
+  f1 <- w1 + mu
+  f2 <- w2 + mu
+  f <- c(f1, f2); REPORT(f) # total smooth
+  nll <- -sum(dnorm(y, f, sigma, log = TRUE), na.rm = TRUE) # observation liklihood
+
+  ### GP part ###
+  # parameter transformations
+  tau_sq <- exp(log_tau_sq); tau <- sqrt(tau_sq); REPORT(tau)
+  kappa_sq <- exp(log_kappa_sq); kappa <- sqrt(kappa_sq); REPORT(kappa)
+  cos_pi_omega <- 2 * plogis(u) - 1; omega <- acos(cos_pi_omega) / pi; REPORT(omega)
+
+  Q1 <- tau_sq * (kappa_sq*kappa_sq * spde1$c0 + 2 * cos_pi_omega * kappa_sq * spde1$g1 + spde1$g2)
+  Q2 <- tau_sq * (kappa_sq*kappa_sq * spde2$c0 + 2 * cos_pi_omega * kappa_sq * spde2$g1 + spde2$g2)
+
+  nll <- nll - dgmrf(w1, 0, Q1, log = TRUE) # GP likelihood 1
+  nll <- nll - dgmrf(w2, 0, Q2, log = TRUE) # GP likelihood 2
+
+  nll
+}
+
+
+# initial parameter list
+par <- list(
+  log_sigma = log(7),
+  log_tau_sq = log(0.005^2),
+  log_kappa_sq = log(30^2),
+  u = -5,
+  mu = -0.5,
+  w1 = numeric(nrow(spde1$c0)),
+  w2 = numeric(nrow(spde2$c0))
+)
+
+# data list
+dat <- list(
+  y = data$y,
+  spde1 = spde1,
+  spde2 = spde2
+)
+
+obj0 <- MakeADFun(nll0, par, random = c("w1", "w2"))
+opt0 <- nlminb(obj0$par, obj0$fn, obj0$gr)
+mod0 <- obj0$report()
+mod0$tau
+mod0$kappa
+mod0$omega
+
+### visualising results
+idx = 6000:8000
+plot(data$time[idx], data$y[idx], pch = 16, col = color[1],
+     xlab = "Time (days)", ylab = "Flux", bty = "n")
+lines(data$time[idx], mod0$f[idx], lwd = 3, col = "blue")
+# smooth is not very periodic
+# erratic behaviour whenever there is a flare
 
 
 ### HMM analysis
@@ -201,8 +206,7 @@ obj <- MakeADFun(jnll, par, random = c("w1", "w2", "z.star"))
 system.time(
   opt <- nlminb(obj$par, obj$fn, obj$gr)
 )
-
-Sys.time()-t1
+Sys.time() - t1
 
 mod <- obj$report()
 mod$kappa
@@ -213,75 +217,42 @@ states <- viterbi(mod = mod)
 stateprobs <- stateprobs(mod = mod)
 flare <- states != 1
 
-# sdr <- sdreport(obj, getJointPrecision = TRUE)
-# par <- as.list(sdr, "Est")
-
-# cholP <- Cholesky(sdr$jointPrecision, LDL = FALSE, Imult = 1e-10)  # returns a "Cholesky" object
-# pars <- lapply(1:1000, function(i){
-#   z <- rnorm(nrow(sdr$jointPrecision))
-#   p <- solve(cholP, z, system = "Lt")  # system="Lt" solves L^T x = z
-#   p + c(sdr$par.fixed, sdr$par.random)
-# })
-# pars <- lapply(pars, obj3$env$parList)
-#
-# allstates <- matrix(NA, nrow(data), length(pars))
-# allstateprobs <- array(dim = c(nrow(data), 3, length(pars)))
-# for(i in 1:length(pars)){
-#   getAll(pars[[i]], dat, warn = FALSE)
-#   Gamma = diag(3)
-#   Gamma[cbind(c(1:3, 3), c(2, 3, 1, 2))] = exp(eta)
-#   Gamma = Gamma / rowSums(Gamma)
-#   delta = c(1, exp(logit_delta))
-#   delta = delta / sum(delta)
-#   sigma = exp(log_sigma)
-#   r = plogis(logit_r)
-#   lambda = exp(log_lambda)
-#   f <- f0 + mu
-#   z <- y - f
-#   n <- length(z); idx = 2:n
-#   allprobs = matrix(0, n, 3)
-#   allprobs[idx,1] = dnorm(z[idx], 0, sigma, log = TRUE)
-#   allprobs[idx,2] = dexgauss(z[idx], z[idx-1], sigma, lambda, log = TRUE)
-#   allprobs[idx,3] = dnorm(z[idx], r * z[idx-1], sigma, log = TRUE)
-#   allstates[,i] <- viterbi(delta, Gamma, exp(allprobs))
-#   allstateprobs[,,i] <- stateprobs(delta, Gamma, exp(allprobs))
-# }
-# state_proportions <- t(apply(allstates, 1, function(x) {
-#   tab <- table(factor(x, levels = 1:3))
-#   prop <- tab / length(x)
-#   return(prop)
-# }))
-# stateprobs_unc <- apply(allstateprobs, c(1,2), mean, na.rm = TRUE)
-prop_mat <- t(stateprobs)
 
 ### Plot result
 # choose what to plot here
-idx <- 7000:7350
+idx <- 7020:7350
 # idx <- 7020:7150
 # idx <- 11000:nrow(data)
 # idx <- 4000:7500
 
-# idx <- 1:nrow(data)
-# prop_mat <- t(state_proportions[idx, ])  # rows = time, cols = states
-# prop_mat <- t(stateprobs_unc[idx,])
+
+pdf("./figs/flare_result.pdf", width = 7, height = 4.5)
 
 # Stacked barplot of state probabilities
+layout(matrix(1:2, ncol = 1), heights = c(0.6, 1))
 # par(mfrow = c(2,1), mar = c(5,4,2,2)+0.1)
-# barplot(prop_mat[,idx], col = color, border = "white", space = 0,
-#         ylab = "State proportion",
-#         main = "Local state probabilities")
+
+par(mar = c(1, 4, 1, 2))
+barplot(t(stateprobs[idx,]), col = c("black", "red", "orange"), border = "white", space = 0,
+        ylab = "State probability",
+        main = "", yaxt = "n")
+axis(2, at = c(0, 0.5, 1), labels = c(0, 0.5, 1))
 
 # Decoded time series
-par(mfrow = c(1,1), mar = c(5,4,2,2)+0.1)
+par(mar = c(5, 4, 0.5, 2), xpd = NA)
 plot(data$time[idx], data$y[idx], col = color[states[idx]], pch = 16,
-     xlab = "Time (sec)", ylab = "Flux", bty = "n", main = "Light Curve")
-# lines(data$time[idx], mod_simple$f[idx], lwd = 2, lty = 3, col = "blue")
-# y_aug <- data$y
-# y_aug[is.na(data$y)] <- mod$y.star
-# points(data$time[idx][is.na(data$y[idx])],
-#       y_aug[idx][is.na(data$y[idx])], col = "blue")
-lines(data$time[idx], mod$f[idx], lwd = 2, col = "plum")
-legend("topleft", legend = c("Quiet", "Firing", "Decaying"), pch = 16, col = color, bty = "n")
+     xlab = "Time (days)", ylab = "Flux", bty = "n")
+lines(data$time[idx], mod$f[idx], lwd = 3, col = "plum")
+
+# legend
+legend(x = 1335.415, y = 190,
+       legend = c("Quiet", "Firing", "Decaying", "Trend"),
+       pch = c(rep(16, 3), NA),
+       lwd = c(rep(NA, 3), 3),
+       col = c(color, "plum"), bty = "n")
+
+dev.off()
+
 
 
 # plot for paper
