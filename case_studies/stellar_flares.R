@@ -1,7 +1,7 @@
 # installing dev version of packages
-devtools::install_github("janolefi/LaMa")
-devtools::install_github("kaskr/RTMB", subdir = "RTMB")
-devtools::install_github("janolefi/RTMBdist")
+# devtools::install_github("janolefi/LaMa")
+# devtools::install_github("kaskr/RTMB", subdir = "RTMB")
+# devtools::install_github("janolefi/RTMBdist")
 
 library(LaMa)       # for HMM functions
 library(RTMBdist)   # for ExGaussian distribution
@@ -29,20 +29,9 @@ data <- data[-((end_before_gap + 1):(start_after_gap-1)), ]
 data$trackID <- 2
 data$trackID[1:end_before_gap] <- 1
 
-
-# subset data
-# data <- data[2:9524,] # first observation is NA, after 9524, long series of missing
-# na_rle <- rle(is.na(data$y))
-# cbind(na_rle$values, na_rle$lengths)[na_rle$values == 1, ]
-
-# linearly interpolating missing observations
-# data$y[is.na(data$y)] <- approx(data$time, data$y, data$time[is.na(data$y)])$y
-
 # centering data
 data$y <- scale(data$y, scale = FALSE)
 
-
-# data <- data[1:4000,]
 
 ### creating 2meshs and finite element matrices
 mesh1 <- fm_mesh_1d(data$time[data$trackID == 1])
@@ -193,7 +182,7 @@ par <- list(
   w2 = rep(0, nrow(spde2$c0)),
   u = -5,
   mu = -0.5,
-  z.star = rnorm(sum(is.na(data$y)), 0, 5)
+  z.star = rnorm(sum(is.na(data$y)), 0, 3)
 )
 
 # data list
@@ -212,6 +201,7 @@ obj <- MakeADFun(jnll, par, random = c("w1", "w2", "z.star"))
 system.time(
   opt <- nlminb(obj$par, obj$fn, obj$gr)
 )
+
 Sys.time()-t1
 
 mod <- obj$report()
