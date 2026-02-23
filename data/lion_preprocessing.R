@@ -1,5 +1,8 @@
 library(dplyr)
 
+## data source:
+# https://www.movebank.org/cms/webapp?gwt_fragment=page=studies,path=study3809257699
+
 lions <- read.csv("./data/African lions in Central Kalahari Botswana.csv")
 nrow(lions)
 
@@ -90,9 +93,5 @@ sum(is.na(data$y_int))
 # add hour
 data$hour <- as.POSIXlt(data$time)$hour + 1
 
-head(data, 100)
-
-plot(data$x, data$y)
-
-saveRDS(data, "./data/lions_new.rds")
-
+# save preprocessed data
+saveRDS(data, "./data/lions.rds")
