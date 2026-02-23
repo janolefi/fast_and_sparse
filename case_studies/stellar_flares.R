@@ -113,11 +113,8 @@ jnll <- function(par) {
   Gamma[cbind(c(1:3, 3), c(2, 3, 1, 2))] <- exp(eta)
   Gamma <- Gamma / rowSums(Gamma)
   # estimated initial distributions
-  delta1 <- c(1, exp(logit_delta1))
-  delta1 <- delta1 / sum(delta1)
-  delta2 <- c(1, exp(logit_delta2))
-  delta2 <- delta2 / sum(delta2)
-  Delta <- rbind(delta1, delta2)
+  Delta <- cbind(1, exp(logit_Delta))
+  Delta <- Delta / rowSums(Delta)
 
   #### state-dependent process ####
   # parameter transformations
@@ -125,45 +122,36 @@ jnll <- function(par) {
   r <- plogis(logit_r); REPORT(r)
   lambda <- exp(log_lambda); REPORT(lambda)
   # state-dependent densities
-  f1 <- w1 + mu; REPORT(f1)
-  f2 <- w2 + mu; REPORT(f2)
-  f <- c(f1, f2); REPORT(f) # total smooth
+  f1 <- w1 + mu
+  f2 <- w2 + mu
+  f <- c(f1, f2); REPORT(f) # quasi-periodic smooth
   z <- y - f; REPORT(mu)
 
-  # latent zs
+  # latent z's where observations are mising -> integrated out
   z[is.na(y)] <- z.star; REPORT(z)
-  y.star <- z.star + f[is.na(y)]; REPORT(y.star)
 
   n <- length(z)
-  # indices of the two separate time series
-  idx <- list(2:(trackInd[2]-1), (trackInd[2]+1):n)
-
+  idx <- list(2:(trackInd[2]-1), (trackInd[2]+1):n) # idx of the 2 time series
   lallprobs <- matrix(0, n, 3)
-  for(ind in idx) {
-    for(t in ind) {
-      if(!is.na(z[t]) & !is.na(z[t-1])) {
-        # regular measurement error
-        lallprobs[t,1] <- dnorm(z[t], 0, sigma, log = TRUE)
-        # firing
-        lallprobs[t,2] <- dexgauss(z[t], z[t-1], sigma, lambda, log = TRUE)
-        # decaying
-        lallprobs[t,3] <- dnorm(z[t], r * z[t-1], sigma, log = TRUE)
-      }
-    }
+  for(i in 1:2) { # loop over time series
+    ind <- idx[[i]]
+    # regular measurement error:
+    lallprobs[ind,1] <- dnorm(z[ind], 0, sigma, log = TRUE)
+    # firing:
+    lallprobs[ind,2] <- dexgauss(z[ind], z[ind-1], sigma, lambda, log = TRUE)
+    # decaying:
+    lallprobs[ind,3] <- dnorm(z[ind], r * z[ind-1], sigma, log = TRUE)
   }
 
-  # banded forward algorithm - HMM likelihood
+  ### HMM likelihood
   nll <- -forward(Delta, Gamma, lallprobs,
                   trackID = trackID, bw = bw, logspace = TRUE)
 
-  ### GP part ###
+  ### GP likelihood
   # parameter transformations
   tau_sq <- exp(log_tau_sq); tau <- sqrt(tau_sq); REPORT(tau)
   kappa_sq <- exp(log_kappa_sq); kappa <- sqrt(kappa_sq); REPORT(kappa)
-  rho <- sqrt(8) / kappa; REPORT(rho) # distance where corr has dropped to 0.1
-  # omega <- plogis(logit_omega); REPORT(omega)
-  cos_pi_omega <- 2 * plogis(u) - 1
-  omega <- acos(cos_pi_omega) / pi; REPORT(omega)
+  cos_pi_omega <- 2 * plogis(u) - 1; omega <- acos(cos_pi_omega)/pi; REPORT(omega)
 
   Q1 <- tau_sq * (kappa_sq*kappa_sq * spde1$c0 + 2 * cos_pi_omega * kappa_sq * spde1$g1 + spde1$g2)
   Q2 <- tau_sq * (kappa_sq*kappa_sq * spde2$c0 + 2 * cos_pi_omega * kappa_sq * spde2$g1 + spde2$g2)
@@ -178,8 +166,7 @@ jnll <- function(par) {
 # initial parameter list
 par <- list(
   eta = rep(-2, 4),
-  logit_delta1 = rep(0, 2),
-  logit_delta2 = rep(0, 2),
+  logit_Delta = matrix(0, 2, 2),
   log_sigma = log(7),
   logit_r = qlogis(0.8),
   log_lambda = log(0.025),
@@ -222,11 +209,7 @@ flare <- states != 1
 
 ### Plot result
 # choose what to plot here
-idx <- 7020:7350
-# idx <- 7020:7150
-# idx <- 11000:nrow(data)
-# idx <- 4000:7500
-
+idx <- 7030:7350
 
 pdf("./figs/flare_result.pdf", width = 7, height = 4.5)
 
